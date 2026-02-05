@@ -222,7 +222,15 @@ def classify_audio():
             file.save(temp_path)
 
         else:
-            data = request.get_json(silent=True)
+           data = request.get_json(silent=True)
+
+# Fallback if Flask didn't parse JSON automatically
+          if data is None:
+            try:
+              data = request.json
+            except:
+              data = None
+
 
             # ---- CASE 2: FLEXIBLE BASE64 INPUT ----
             if data:
@@ -275,3 +283,4 @@ def classify_audio():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, threaded=True)
+
