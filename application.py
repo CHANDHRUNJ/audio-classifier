@@ -60,7 +60,72 @@ def analyze_audio(file_path):
 # ------------- FRONTEND (HOMEPAGE) ----------------
 @app.route('/', methods=['GET'])
 def home():
-    return render_template("index.html")
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>AI Voice Detector</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; margin-top: 40px; background: #f4f4f4; }
+            .container { background: white; padding: 25px; width: 55%; margin: auto; border-radius: 12px; box-shadow: 0px 0px 12px rgba(0,0,0,0.2); }
+            button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 6px; }
+            #result { margin-top: 20px; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h2>🎙️ AI Voice Detection (Web App)</h2>
+
+            <input type="file" id="audioFile" accept="audio/*"><br><br>
+            <button onclick="uploadAudio()">Analyze Audio</button>
+
+            <div id="result"></div>
+        </div>
+
+        <script>
+        async function uploadAudio() {
+            const fileInput = document.getElementById("audioFile");
+            if (!fileInput.files.length) {
+                alert("Please select an audio file first!");
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+
+            reader.onload = async function () {
+                const base64Audio = reader.result.split(",")[1];
+                document.getElementById("result").innerHTML = "⏳ Analyzing...";
+
+                const response = await fetch("/classify", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-API-KEY": "voice_detect_2026"
+                    },
+                    body: JSON.stringify({ "base64": base64Audio })
+                });
+
+                const data = await response.json();
+
+                if (data.status === "success") {
+                    document.getElementById("result").innerHTML =
+                        `<p>🔍 Result: ${data.classification.label}</p>
+                         <p>📊 Confidence: ${data.classification.confidence}</p>
+                         <p>📝 Explanation: ${data.classification.explanation}</p>`;
+                } else {
+                    document.getElementById("result").innerHTML =
+                        `<p style="color:red;">Error: ${data.error}</p>`;
+                }
+            };
+        }
+        </script>
+    </body>
+    </html>
+    """
+
+   
 
 # ------------- MAIN API ENDPOINT -----------------
 @app.route('/classify', methods=['POST'])
@@ -124,4 +189,5 @@ def classify_audio():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, threaded=True)
+
 
