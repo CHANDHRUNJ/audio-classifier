@@ -2,8 +2,9 @@ import os
 import uuid
 import base64
 import requests
+import wave
+
 from flask import Flask, request, jsonify
-from pydub import AudioSegment
 
 app = Flask(__name__)
 
@@ -16,36 +17,45 @@ def validate_api_key(headers):
     return headers.get("X-API-KEY") == API_KEY
 
 def analyze_audio(file_path):
-    audio = AudioSegment.from_file(file_path)
-    duration_sec = len(audio) / 1000.0
+    """
+    Simple, reliable analysis WITHOUT pydub.
+    We only read basic WAV metadata.
+    """
+    try:
+        with wave.open(file_path, "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            duration_sec = frames / float(rate)
 
-    if audio.dBFS < -50.0:
+        if duration_sec < 5.0:
+            return {
+                "label": "Short Audio",
+                "confidence": 0.92,
+                "duration_seconds": round(duration_sec, 2),
+                "explanation": "Audio is under 5 seconds."
+            }
+        elif duration_sec < 60.0:
+            return {
+                "label": "Medium Audio",
+                "confidence": 0.88,
+                "duration_seconds": round(duration_sec, 2),
+                "explanation": "Audio is between 5 and 60 seconds."
+            }
+        else:
+            return {
+                "label": "Long Audio",
+                "confidence": 0.90,
+                "duration_seconds": round(duration_sec, 2),
+                "explanation": "Audio is longer than 1 minute."
+            }
+
+    except Exception as e:
         return {
-            "label": "Silence",
-            "confidence": 0.99,
-            "duration_seconds": duration_sec,
-            "explanation": "Average volume is below -50dBFS."
+            "label": "Unknown",
+            "confidence": 0.5,
+            "duration_seconds": None,
+            "explanation": f"Could not analyze audio: {str(e)}"
         }
-
-    if duration_sec < 5.0:
-        label = "Short Command"
-        confidence = 0.95
-        explanation = "Audio is under 5 seconds, typical for voice commands."
-    elif duration_sec < 60.0:
-        label = "Voice Message"
-        confidence = 0.88
-        explanation = "Audio is between 5s and 60s, typical for conversation."
-    else:
-        label = "Long Form Content"
-        confidence = 0.90
-        explanation = "Audio exceeds 1 minute."
-
-    return {
-        "label": label,
-        "confidence": confidence,
-        "duration_seconds": duration_sec,
-        "explanation": explanation
-    }
 
 @app.route('/classify', methods=['POST'])
 def classify_audio():
