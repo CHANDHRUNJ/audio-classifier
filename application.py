@@ -4,22 +4,21 @@ import base64
 import requests
 import wave
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
 
 # ---------------- CONFIG ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app = Flask(__name__, template_folder=os.path.join(BASE_DIR, "templates"))
-
+app = Flask(__name__)
 
 API_KEY = "voice_detect_2026"
-TEMP_DIR = "temp_audio"
+TEMP_DIR = os.path.join(BASE_DIR, "temp_audio")
 os.makedirs(TEMP_DIR, exist_ok=True)
 # ---------------------------------------
 
 def validate_api_key(headers):
     return headers.get("X-API-KEY") == API_KEY
 
-# --------- SIMPLE AUDIO ANALYSIS (NO PYDUB) ----------
+# --------- SIMPLE AUDIO ANALYSIS ----------
 def analyze_audio(file_path):
     try:
         with wave.open(file_path, "rb") as wf:
@@ -57,81 +56,159 @@ def analyze_audio(file_path):
             "explanation": f"Could not analyze audio: {str(e)}"
         }
 
-# ------------- FRONTEND (HOMEPAGE) ----------------
+# ------------- HOMEPAGE (PRETTY UI, INLINE HTML) ----------------
 @app.route('/', methods=['GET'])
 def home():
     return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>AI Voice Detector</title>
-        <style>
-            body { font-family: Arial, sans-serif; text-align: center; margin-top: 40px; background: #f4f4f4; }
-            .container { background: white; padding: 25px; width: 55%; margin: auto; border-radius: 12px; box-shadow: 0px 0px 12px rgba(0,0,0,0.2); }
-            button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 6px; }
-            #result { margin-top: 20px; font-weight: bold; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h2>🎙️ AI Voice Detection (Web App)</h2>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>AI Voice Detector</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #1f2933, #111827);
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
 
-            <input type="file" id="audioFile" accept="audio/*"><br><br>
-            <button onclick="uploadAudio()">Analyze Audio</button>
+    .app-card {
+      background: #0f172a;
+      padding: 30px;
+      border-radius: 16px;
+      width: 420px;
+      box-shadow: 0px 10px 30px rgba(0,0,0,0.4);
+      text-align: center;
+      border: 1px solid #1e293b;
+    }
 
-            <div id="result"></div>
-        </div>
+    h2 {
+      color: #38bdf8;
+    }
 
-        <script>
-        async function uploadAudio() {
-            const fileInput = document.getElementById("audioFile");
-            if (!fileInput.files.length) {
-                alert("Please select an audio file first!");
-                return;
-            }
+    .file-box {
+      border: 2px dashed #334155;
+      padding: 20px;
+      border-radius: 10px;
+      background: #020617;
+      margin-bottom: 15px;
+    }
 
-            const file = fileInput.files[0];
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+      color: #0f172a;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
 
-            reader.onload = async function () {
-                const base64Audio = reader.result.split(",")[1];
-                document.getElementById("result").innerHTML = "⏳ Analyzing...";
+    #result {
+      margin-top: 18px;
+      padding: 12px;
+      border-radius: 10px;
+      background: #020617;
+      border: 1px solid #1e293b;
+      display: none;
+    }
 
-                const response = await fetch("/classify", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-API-KEY": "voice_detect_2026"
-                    },
-                    body: JSON.stringify({ "base64": base64Audio })
-                });
+    .loading {
+      display: none;
+      margin-top: 12px;
+      color: #38bdf8;
+    }
+  </style>
+</head>
 
-                const data = await response.json();
+<body>
+  <div class="app-card">
+    <h2>🎙️ AI Voice Detection</h2>
 
-                if (data.status === "success") {
-                    document.getElementById("result").innerHTML =
-                        `<p>🔍 Result: ${data.classification.label}</p>
-                         <p>📊 Confidence: ${data.classification.confidence}</p>
-                         <p>📝 Explanation: ${data.classification.explanation}</p>`;
-                } else {
-                    document.getElementById("result").innerHTML =
-                        `<p style="color:red;">Error: ${data.error}</p>`;
-                }
-            };
-        }
-        </script>
-    </body>
-    </html>
+    <div class="file-box">
+      <input type="file" id="audioFile" accept="audio/*" />
+    </div>
+
+    <button onclick="uploadAudio()">Analyze Audio</button>
+
+    <div class="loading" id="loadingText">⏳ Analyzing your audio...</div>
+
+    <div id="result">
+      <div id="resLabel"></div>
+      <div id="resConf"></div>
+      <div id="resExplain"></div>
+    </div>
+  </div>
+
+<script>
+async function uploadAudio() {
+  const fileInput = document.getElementById("audioFile");
+  const loadingText = document.getElementById("loadingText");
+  const resultBox = document.getElementById("result");
+
+  if (!fileInput.files.length) {
+    alert("Please select an audio file first!");
+    return;
+  }
+
+  loadingText.style.display = "block";
+  resultBox.style.display = "none";
+
+  const file = fileInput.files[0];
+  const reader = new FileReader();
+
+  reader.readAsDataURL(file);
+
+  reader.onload = async function () {
+    const base64Audio = reader.result.split(",")[1];
+
+    const response = await fetch("/classify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "voice_detect_2026"
+      },
+      body: JSON.stringify({
+        "base64": base64Audio
+      })
+    });
+
+    const data = await response.json();
+
+    loadingText.style.display = "none";
+    resultBox.style.display = "block";
+
+    if (data.status === "success") {
+      document.getElementById("resLabel").innerText =
+        "Result: " + data.classification.label;
+
+      document.getElementById("resConf").innerText =
+        "Confidence: " + data.classification.confidence;
+
+      document.getElementById("resExplain").innerText =
+        "Explanation: " + data.classification.explanation;
+    } else {
+      document.getElementById("resLabel").innerText = "Error ❌";
+      document.getElementById("resExplain").innerText = data.error;
+    }
+  };
+}
+</script>
+</body>
+</html>
     """
-
-   
 
 # ------------- MAIN API ENDPOINT -----------------
 @app.route('/classify', methods=['POST'])
 def classify_audio():
 
-    # ---- API KEY CHECK ----
     if not validate_api_key(request.headers):
         return jsonify({"error": "Unauthorized - Invalid API Key"}), 401
 
@@ -139,38 +216,47 @@ def classify_audio():
     temp_path = os.path.join(TEMP_DIR, temp_filename)
 
     try:
-        # ---------- CASE 1: NORMAL FILE UPLOAD (FORM-DATA) ----------
+        # ---- CASE 1: FORM-DATA FILE UPLOAD ----
         if request.files and "file" in request.files:
             file = request.files["file"]
             file.save(temp_path)
 
         else:
-            # Try to read JSON body
             data = request.get_json(silent=True)
 
-            # ---------- CASE 2: RAW JSON WITH BASE64 ----------
-            if data and ('base64' in data or 'audio_base64' in data):
-                b64 = data.get('base64') or data.get('audio_base64')
-                audio_data = base64.b64decode(b64)
-                with open(temp_path, "wb") as f:
-                    f.write(audio_data)
+            # ---- CASE 2: FLEXIBLE BASE64 INPUT ----
+            if data:
+                possible_keys = ["base64", "audio_base64", "audio", "file_base64"]
 
-            # ---------- CASE 3: URL (OPTIONAL) ----------
-            elif data and 'url' in data:
-                response = requests.get(data['url'], stream=True, timeout=10)
-                if response.status_code != 200:
-                    return jsonify({"error": "Failed to retrieve URL"}), 400
+                b64 = None
+                for key in possible_keys:
+                    if key in data:
+                        b64 = data[key]
+                        break
 
-                with open(temp_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                if b64:
+                    audio_data = base64.b64decode(b64)
+                    with open(temp_path, "wb") as f:
+                        f.write(audio_data)
+
+                # ---- CASE 3: URL INPUT ----
+                elif "url" in data:
+                    response = requests.get(data["url"], stream=True, timeout=10)
+                    if response.status_code != 200:
+                        return jsonify({"error": "Failed to retrieve URL"}), 400
+
+                    with open(temp_path, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                else:
+                    return jsonify({
+                        "error": "Send audio as file, base64/audio_base64/audio/file_base64, or url"
+                    }), 400
 
             else:
-                return jsonify({
-                    "error": "Send either: file (form-data), base64/audio_base64 (JSON), or url"
-                }), 400
+                return jsonify({"error": "No valid body received"}), 400
 
-        # -------- ANALYZE AUDIO ----------
         result = analyze_audio(temp_path)
 
         return jsonify({
@@ -189,5 +275,3 @@ def classify_audio():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, threaded=True)
-
-
